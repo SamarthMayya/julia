@@ -441,6 +441,11 @@
          (block
           ,(scopenest (cdr names) (cdr vals) expr)))))
 
+(define (make-assignments names vals expr)
+  `(block
+    ,@(map make-assignment names vals)
+    ,expr))
+
 (define (keywords-method-def-expr name sparams argl body rett)
   (let* ((kargl (cdar argl))  ;; keyword expressions (= k v)
          (annotations (map (lambda (a) `(meta ,(cadr a) ,(arg-name (cadr (caddr a)))))
@@ -487,6 +492,15 @@
                                              (lambda (x) (eq? x v))
                                              vals))
                                 keynames))
+         ;; if keyword args don't depend on each other and the default
+         ;; values don't have embedded assignments (ick) then we can use
+         ;; ssavalues instead of slots in the sorter method.
+         (ssa-keyvars? (and (not ordered-defaults)
+                            (not (contains assignment? vals))))
+         (keyvars (if ssa-keyvars?
+                      (map (lambda (x) (make-ssavalue)) keynames)
+                      keynames))
+         (tempslot (gensy))
          ;; list of function's initial line number and meta nodes (empty if none)
          (prologue (extract-method-prologue body))
          ;; body statements
@@ -554,8 +568,8 @@
                      `(meta ,(cadr m) ,@(filter (lambda (v) (not (memq v keynames)))
                                                 (cddr m))))
                    (filter nospecialize-meta? prologue))
-            ,(scopenest
-              keynames
+            ,((if ssa-keyvars? make-assignments scopenest)
+              keyvars
               (map (lambda (v dflt)
                      (let* ((k     (decl-var v))
                             (rval0 `(call (top getindex) ,kw (inert ,k)))
@@ -580,9 +594,10 @@
                                                                ,temp)))
                                                 ,temp))
                                       rval0)))
-                       `(if (call (top haskey) ,kw (quote ,k))
-                            ,rval
-                            ,dflt)))
+                       `(block (if (call (top haskey) ,kw (quote ,k))
+                                   (= ,tempslot ,rval)
+                                   (= ,tempslot ,dflt))
+                               ,tempslot)))
                    vars vals)
               `(block
                 (= ,rkw (call (top pairs)
@@ -596,7 +611,7 @@
                             (call (top kwerr) ,kw ,@(map arg-name pargl) ,@splatted-vararg)))
                       '())
                 (return (call ,mangled  ;; finally, call the core function
-                              ,@keynames
+                              ,@keyvars
                               ,@(if (null? restkw) '() (list rkw))
                               ,@(map arg-name pargl)
                               ,@splatted-vararg))))))
