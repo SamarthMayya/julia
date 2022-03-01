@@ -1373,14 +1373,20 @@ length(s::Stateful) = length(s.itr) - s.taken
 
 """
     only(x)
+    only(f:::Function, x)
 
 Return the one and only element of collection `x`, or throw an [`ArgumentError`](@ref) if the
-collection has zero or multiple elements.
+collection has zero or multiple elements. If a function `f` is passed, then if the collection
+has zero or multiple elements, `f()` will be called, and the result will be thrown. `f()` will
+not be called if the collection has exactly one element.
 
 See also [`first`](@ref), [`last`](@ref).
 
 !!! compat "Julia 1.4"
     This method requires at least Julia 1.4.
+
+!!! compat "Julia 1.9"
+    The `only(f:::Function, x)` method requires at least Julia 1.9.
 
 # Examples
 ```jldoctest
@@ -1399,6 +1405,13 @@ julia> only(('a', 'b'))
 ERROR: ArgumentError: Tuple contains 2 elements, must contain exactly 1 element
 Stacktrace:
 [...]
+
+julia> only(('a', 'b')) do
+           ErrorException("My custom error message")
+       end
+ERROR: ErrorException: My custom error message
+Stacktrace:
+[...]
 ```
 """
 @propagate_inbounds function only(x)
@@ -1412,6 +1425,17 @@ Stacktrace:
     end
     return ret
 end
+@propagate_inbounds function only(f::F, x) where {F <: Function}
+    i = iterate(x)
+    @boundscheck if i === nothing
+        throw(f())
+    end
+    (ret, state) = i::NTuple{2,Any}
+    @boundscheck if iterate(x, state) !== nothing
+        throw(f())
+    end
+    return ret
+end
 
 # Collections of known size
 only(x::Ref) = x[]
@@ -1421,12 +1445,13 @@ only(x::Tuple{Any}) = x[1]
 only(x::Tuple) = throw(
     ArgumentError("Tuple contains $(length(x)) elements, must contain exactly 1 element")
 )
+only(f::F, x::Tuple) where {F <: Function} = throw(f())
 only(a::AbstractArray{<:Any, 0}) = @inbounds return a[]
 only(x::NamedTuple{<:Any, <:Tuple{Any}}) = first(x)
 only(x::NamedTuple) = throw(
     ArgumentError("NamedTuple contains $(length(x)) elements, must contain exactly 1 element")
 )
-
+only(f::Function, x::NamedTuple) where {F <: Function} = throw(f())
 
 Base.intersect(a::ProductIterator, b::ProductIterator) = ProductIterator(intersect.(a.iterators, b.iterators))
 
