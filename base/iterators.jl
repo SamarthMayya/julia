@@ -1409,7 +1409,7 @@ Stacktrace:
 julia> only(('a', 'b')) do
            ErrorException("My custom error message")
        end
-ERROR: ErrorException: My custom error message
+ERROR: My custom error message
 Stacktrace:
 [...]
 ```
